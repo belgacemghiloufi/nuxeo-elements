@@ -26,6 +26,7 @@ import './nuxeo-connection.js';
    *                      op="Document.Query"
    *                      params='{"query": "select * from Document"}'
    *                      on-response="handleResponse"
+   *                      on-failure="handleFailure"
    *                      enrichers="documentURL, preview"></nuxeo-operation>
    *
    * With `auto` set to `true`, the operation is executed whenever
@@ -308,20 +309,22 @@ import './nuxeo-connection.js';
           return this.response;
         })
         .catch((error) => {
-          if (error.response.status === 401) {
-            this.dispatchEvent(
-              new CustomEvent('unauthorized-request', {
-                bubbles: true,
-                composed: true,
-                detail: error,
-              }),
-            );
-          }
+          const event = error.response.status === 401 ? 'unauthorized-request' : 'failure';
+
+          this.dispatchEvent(
+            new CustomEvent(event, {
+              bubbles: true,
+              composed: true,
+              detail: {
+                error,
+              },
+            }),
+          );
           this.success = false;
           this.error = error;
           console.warn(`Operation request failed: ${error}`);
           this._setActiveRequests(this.activeRequests - 1);
-          throw error;
+          throw this.error;
         });
     }
 
@@ -334,15 +337,20 @@ import './nuxeo-connection.js';
     }
 
     _poll(url) {
-      return new Promise((resolve) => {
+      return new Promise((resolve, reject) => {
         const fn = () => {
-          this.$.nx.http(url).then((res) => {
-            if (this._isRunning(res)) {
-              window.setTimeout(() => fn(), this.pollInterval, url);
-            } else {
-              resolve(res);
-            }
-          });
+          this.$.nx
+            .http(url)
+            .then((res) => {
+              if (this._isRunning(res)) {
+                window.setTimeout(() => fn(), this.pollInterval, url);
+              } else {
+                resolve(res);
+              }
+            })
+            .catch((error) => {
+              reject(error);
+            });
         };
         fn();
       });
